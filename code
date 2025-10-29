@@ -1,0 +1,125 @@
+function onOpen() {
+  var ui = SpreadsheetApp.getUi();
+  ui.createMenu('📦 Stock Tools')
+    .addItem('Update', 'generateColorPivot')
+    .addToUi();
+}
+
+function generateColorPivot() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName("Polyhex data");
+
+  if (!sheet) {
+    SpreadsheetApp.getUi().alert("⚠️ Sheet named 'Polyhex data' not found. Please check your sheet name.");
+    return;
+  }
+  
+  // Define the three colors to use as headers
+  var pivotColors = ['GREEN', 'BLACK', 'SILVER', 'GRN', 'BLK'];
+
+  var data = sheet.getDataRange().getValues();
+  var headers = data[0];
+  var stockEntries = data.slice(1);
+
+  var productIndex = headers.indexOf("Product");
+  var locationIndex = headers.indexOf("Location");
+  var quantityIndex = headers.indexOf("Quantity");
+
+  if (productIndex === -1 || locationIndex === -1 || quantityIndex === -1) {
+    SpreadsheetApp.getUi().alert("⚠️ Missing required headers (Product, Location, Quantity). Please check your sheet.");
+    return;
+  }
+
+  var pivotMap = new Map();
+  var uniqueLocations = new Set();
+  var uniqueProducts = new Set();
+  
+  for (var i = 0; i < stockEntries.length; i++) {
+    var row = stockEntries[i];
+    var rawProduct = row[productIndex];
+    var location = row[locationIndex];
+    var rawQuantity = row[quantityIndex];
+
+    if (!rawProduct || !location) {
+      continue;
+    }
+
+    // --- UPDATED LOGIC HERE ---
+    var quantityMatch = String(rawQuantity).match(/(\d+\.?\d*)/);
+    var quantity = quantityMatch ? Number(quantityMatch[1]) : 0;
+    
+    // Check for color in parentheses, or as a 3-letter code at the end
+    var productMatch = rawProduct.toString().match(/(.*)\s*\(([^)]+)\)|(.*)(_...)$/i);
+    var baseProduct = productMatch ? (productMatch[1] || productMatch[3]).trim() : rawProduct.toString().trim();
+    var color = productMatch ? (productMatch[2] || productMatch[4]).replace(/^_/,"").trim().toUpperCase() : "Unknown";
+
+    if (quantity <= 0) {
+      continue;
+    }
+
+    if (pivotColors.includes(color)) {
+      uniqueLocations.add(location);
+      uniqueProducts.add(baseProduct);
+      
+      var key = location + "||" + baseProduct;
+      if (!pivotMap.has(key)) {
+        pivotMap.set(key, {
+          location: location,
+          product: baseProduct,
+          colors: {}
+        });
+      }
+      
+      pivotMap.get(key).colors[color] = quantity;
+    }
+  }
+
+  var outputSheetName = "Final_Stock_Pivot";
+  var outputSheet = ss.getSheetByName(outputSheetName);
+  if (!outputSheet) {
+    outputSheet = ss.insertSheet(outputSheetName);
+  } else {
+    outputSheet.clear();
+  }
+
+  var outputHeaders = ["Location", "Product"].concat(pivotColors);
+  outputSheet.appendRow(outputHeaders);
+
+  var sortedLocations = Array.from(uniqueLocations).sort();
+  var sortedProducts = Array.from(uniqueProducts).sort();
+  var rowNumber = 2;
+  
+  for (var i = 0; i < sortedLocations.length; i++) {
+    var loc = sortedLocations[i];
+    for (var j = 0; j < sortedProducts.length; j++) {
+      var prod = sortedProducts[j];
+      var key = loc + "||" + prod;
+      
+      if (pivotMap.has(key)) {
+        var item = pivotMap.get(key);
+        var rowData = [item.location, item.product];
+        
+        for (var k = 0; k < pivotColors.length; k++) {
+          var color = pivotColors[k];
+          var quantity = item.colors[color] || 0;
+          rowData.push(quantity);
+        }
+        outputSheet.appendRow(rowData);
+        
+        for (var k = 0; k < pivotColors.length; k++) {
+          var quantity = item.colors[pivotColors[k]] || 0;
+          var range = outputSheet.getRange(rowNumber, k + 3);
+          
+          if (quantity === 0) {
+            range.setBackground('#FFC0CB'); // For zero stock
+          } else if (quantity < 5) {
+            range.setBackground('#a6d8f7'); // For low stock (<5)
+          }
+        }
+        rowNumber++;
+      }
+    }
+  }
+  
+  SpreadsheetApp.getUi().alert("✅ Final stock pivot, Below 5 Blue🟦, Zero is red🔴 updated in '" + outputSheetName + "' sheet.");
+}
